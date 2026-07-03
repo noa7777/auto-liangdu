@@ -111,7 +111,20 @@ class StorageService {
   Future<void> updateMappingTable(List<MappingEntry> entries) async {
     _mappingTable = List.from(entries);
     _mappingTable.sort((a, b) => a.lux.compareTo(b.lux));
+    _dedupeMappingTable();
     await _saveData();
+  }
+
+  // 相同 Lux 只保留最后一项（后导入/后编辑的亮度覆盖前者）
+  void _dedupeMappingTable() {
+    final seen = <int>{};
+    for (int i = _mappingTable.length - 1; i >= 0; i--) {
+      if (seen.contains(_mappingTable[i].lux)) {
+        _mappingTable.removeAt(i);
+      } else {
+        seen.add(_mappingTable[i].lux);
+      }
+    }
   }
 
   Future<void> addMappingEntry(MappingEntry entry) async {
@@ -153,6 +166,7 @@ class StorageService {
               .toList() ??
           [];
       _mappingTable.sort((a, b) => a.lux.compareTo(b.lux));
+      _dedupeMappingTable();
       await _saveData();
     } catch (e) {
       print('导入配置失败: $e');

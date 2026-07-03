@@ -140,14 +140,13 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
       return;
     }
 
+    // 非插值区间匹配：取当前 Lux 所在区间的前一个档位
     int targetBrightness = _mappingTable[0].brightness;
     for (int i = 0; i < _mappingTable.length; i++) {
-      if (_currentLux <= _mappingTable[i].lux) {
+      if (_currentLux >= _mappingTable[i].lux) {
         targetBrightness = _mappingTable[i].brightness;
+      } else {
         break;
-      }
-      if (i == _mappingTable.length - 1) {
-        targetBrightness = _mappingTable[i].brightness;
       }
     }
 
@@ -279,10 +278,16 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
 
     if (result != null) {
       setState(() {
-        _mappingTable.add(MappingEntry(
-          lux: result.lux,
-          brightness: result.brightness.clamp(2, 100),
-        ));
+        final existingIndex = _mappingTable.indexWhere((e) => e.lux == result.lux);
+        if (existingIndex >= 0) {
+          // 相同 Lux 已存在：新亮度覆盖旧亮度
+          _mappingTable[existingIndex].brightness = result.brightness.clamp(2, 100);
+        } else {
+          _mappingTable.add(MappingEntry(
+            lux: result.lux,
+            brightness: result.brightness.clamp(2, 100),
+          ));
+        }
         _mappingTable.sort((a, b) => a.lux.compareTo(b.lux));
       });
       await _storageService.updateMappingTable(_mappingTable);
@@ -539,7 +544,16 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
                       final lux = int.tryParse(value);
                       if (lux != null) {
                         setState(() {
-                          mapping.lux = lux;
+                          final duplicateIndex = _mappingTable.indexWhere(
+                            (e) => e.lux == lux && e != mapping,
+                          );
+                          if (duplicateIndex >= 0) {
+                            // 相同 Lux 已存在：当前行亮度覆盖旧行亮度，并删除当前行
+                            _mappingTable[duplicateIndex].brightness = mapping.brightness;
+                            _mappingTable.remove(mapping);
+                          } else {
+                            mapping.lux = lux;
+                          }
                           _mappingTable.sort((a, b) => a.lux.compareTo(b.lux));
                         });
                         _storageService.updateMappingTable(_mappingTable);
