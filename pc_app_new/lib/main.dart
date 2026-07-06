@@ -79,6 +79,11 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
   Timer? _manualTimer;
   Timer? _debounceTimer;
 
+  // 最近 8 秒的环境光环状缓存（8 个位置，每秒写入一个值）
+  final List<int?> _luxBuffer = List.filled(8, null);
+  int _luxBufferIndex = 0;
+  Timer? _luxBufferTimer;
+
   @override
   void initState() {
     super.initState();
@@ -117,6 +122,11 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
         _isConnected = connected;
       });
     });
+
+    // 每秒写入一次当前 Lux 到环状缓存
+    _luxBufferTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _pushLuxToBuffer(_currentLux);
+    });
   }
 
   // ESP8266 来数据处理（中途触发）
@@ -133,6 +143,31 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
     }
   }
 
+  // 把当前 Lux 写入最近 8 秒的环状缓存（每秒调用一次）
+  void _pushLuxToBuffer(int lux) {
+    _luxBuffer[_luxBufferIndex] = lux;
+    _luxBufferIndex = (_luxBufferIndex + 1) % _luxBuffer.length;
+  }
+
+  // 取缓存中最大的 Lux（未填满时忽略 null）
+  int _getMaxLuxFromBuffer() {
+    int? maxLux;
+    for (final lux in _luxBuffer) {
+      if (lux != null) {
+        maxLux = maxLux == null ? lux : (lux > maxLux ? lux : maxLux);
+      }
+    }
+    return maxLux ?? _currentLux;
+  }
+
+  // 手动调节时清空 Lux 缓存，避免历史高 Lux 在手动期间继续触发表格逻辑
+  void _clearLuxBuffer() {
+    for (int i = 0; i < _luxBuffer.length; i++) {
+      _luxBuffer[i] = null;
+    }
+    _luxBufferIndex = 0;
+  }
+
   // 查表应用亮度
   Future<void> _applyTableBrightness() async {
     if (_mappingTable.isEmpty) {
@@ -140,10 +175,13 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
       return;
     }
 
+    // 取最近 8 秒内的最大 Lux 来查表，避免短暂掉光导致亮度猛跌
+    final luxForLookup = _getMaxLuxFromBuffer();
+
     // 非插值区间匹配：取当前 Lux 所在区间的前一个档位
     int targetBrightness = _mappingTable[0].brightness;
     for (int i = 0; i < _mappingTable.length; i++) {
-      if (_currentLux >= _mappingTable[i].lux) {
+      if (luxForLookup >= _mappingTable[i].lux) {
         targetBrightness = _mappingTable[i].brightness;
       } else {
         break;
@@ -171,6 +209,7 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
     });
     _updateTrayTooltip();
     _tManual = DateTime.now();
+    _clearLuxBuffer();
     _startManualTimer();
     if (!success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -197,6 +236,7 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
     });
     _updateTrayTooltip();
     _tManual = DateTime.now();
+    _clearLuxBuffer();
     _startManualTimer();
     if (!success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -313,6 +353,7 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
   @override
   void dispose() {
     _manualTimer?.cancel();
+    _luxBufferTimer?.cancel();
     _luxSubscription?.cancel();
     _connectionSubscription?.cancel();
     _udpService.dispose();
