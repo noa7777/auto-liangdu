@@ -37,7 +37,7 @@ class BrightnessService {
   Stream<int> get brightnessStream => _brightnessController.stream;
 
   bool _scriptsReady = false;
-  String? _brightScriptPath;
+  String? _ddcToolPath;
 
   Timer? _pendingSetTimer;
   int? _pendingLevel;
@@ -115,19 +115,29 @@ if ($Action -eq "set") {
   void _ensureScripts() {
     if (_scriptsReady) return;
     try {
-      final appData = Platform.environment['APPDATA'];
-      if (appData == null) {
-        _logBrightness('无 APPDATA 环境变量');
-        return;
+      // 查找 DDCBrightness.exe：优先在同目录，其次在 APPDATA
+      final exePath = Platform.resolvedExecutable;
+      final exeDir = exePath.substring(0, exePath.lastIndexOf('\\'));
+      final localTool = '$exeDir\\DDCBrightness.exe';
+      if (File(localTool).existsSync()) {
+        _ddcToolPath = localTool;
+        _logBrightness('找到 DDC 工具: $_ddcToolPath');
+      } else {
+        final appData = Platform.environment['APPDATA'];
+        if (appData != null) {
+          final dir = Directory('$appData\\AutoLiangDu');
+          dir.createSync(recursive: true);
+          _ddcToolPath = '${dir.path}\\DDCBrightness.exe';
+          // 从 exe 目录复制到 APPDATA（首次运行）
+          if (!File(_ddcToolPath!).existsSync() && File(localTool).existsSync()) {
+            File(localTool).copySync(_ddcToolPath!);
+            _logBrightness('复制 DDC 工具到: $_ddcToolPath');
+          }
+        }
       }
-      final dir = Directory('$appData\\AutoLiangDu');
-      dir.createSync(recursive: true);
-      _brightScriptPath = '${dir.path}\\ddc.ps1';
-      File(_brightScriptPath!).writeAsStringSync(_ddcBrightnessScript, flush: true);
-      _logBrightness('已写入 DDC 脚本: $_brightScriptPath');
       _scriptsReady = true;
     } catch (e) {
-      _logBrightness('写脚本失败: $e');
+      _logBrightness('初始化 DDC 工具失败: $e');
     }
   }
 
@@ -165,7 +175,7 @@ if ($Action -eq "set") {
     level = level.clamp(2, 100);
     _ensureScripts();
 
-    // 立即更新目标亮度并重启防抖定时器，合并连续点击
+    // 立即更新目标亮度；若当前没在跑 DDC，则马上执行
     _pendingSetTimer?.cancel();
     _pendingLevel = level;
 
@@ -174,7 +184,8 @@ if ($Action -eq "set") {
       return true;
     }
 
-    _pendingSetTimer = Timer(const Duration(milliseconds: 200), _applyPendingSet);
+    // 立即执行，不再等 200ms；连续点击会在 DDC 执行期间被合并
+    unawaited(_applyPendingSet());
     return true; // UI 立即反馈，无需等待 PowerShell
   }
 
@@ -210,46 +221,40 @@ if ($Action -eq "set") {
       _logBrightness(_lastError!);
     } finally {
       _isSetting = false;
-      _pendingLevel = null;
+      // 执行期间如果有新的点击，100ms 后继续应用最新的目标亮度
+      if (_pendingLevel != null) {
+        _pendingSetTimer = Timer(const Duration(milliseconds: 100), _applyPendingSet);
+      } else {
+        _pendingLevel = null;
+      }
     }
   }
 
   Future<bool> _setBrightnessDDC(int level) async {
-    if (_brightScriptPath == null) return false;
+    if (_ddcToolPath == null) return false;
     try {
-      final result = await Process.run('powershell', [
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', _brightScriptPath!,
-        '-Action', 'set',
-        '-Level', level.toString(),
-      ]);
+      final result = await Process.run(_ddcToolPath!, ['set', level.toString()]);
       final out = result.stdout.toString().trim();
-      _logBrightness('DDC set exit=${result.exitCode} stdout=${out} stderr=${result.stderr}');
-      return out == 'OK';
+      _logBrightness('DDC tool set exit=${result.exitCode} stdout=${out}');
+      return out.startsWith('OK');
     } catch (e) {
-      _logBrightness('DDC set 异常: $e');
+      _logBrightness('DDC tool set 异常: $e');
       return false;
     }
   }
 
   Future<int> _getBrightnessDDC() async {
-    if (_brightScriptPath == null) return -1;
+    if (_ddcToolPath == null) return -1;
     try {
-      final result = await Process.run('powershell', [
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', _brightScriptPath!,
-        '-Action', 'get',
-      ]);
+      final result = await Process.run(_ddcToolPath!, ['get']);
       final out = result.stdout.toString().trim();
-      _logBrightness('DDC get exit=${result.exitCode} stdout=${out} stderr=${result.stderr}');
+      _logBrightness('DDC tool get exit=${result.exitCode} stdout=${out}');
       if (out.startsWith('CUR:')) {
         final cur = int.tryParse(out.substring(4));
         if (cur != null && cur >= 0) return cur;
       }
     } catch (e) {
-      _logBrightness('DDC get 异常: $e');
+      _logBrightness('DDC tool get 异常: $e');
     }
     return -1;
   }

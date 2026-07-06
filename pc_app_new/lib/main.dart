@@ -19,7 +19,7 @@ void main() async {
     center: true,
     backgroundColor: Colors.white,
     skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
+    titleBarStyle: TitleBarStyle.hidden,
   );
 
   windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -297,11 +297,7 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
 
   @override
   void onWindowClose() async {
-    if (_minimizeToTray) {
-      await windowManager.hide();
-    } else {
-      exit(0);
-    }
+    await windowManager.hide();
   }
 
   @override
@@ -331,7 +327,14 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AutoLiangDu PC 新版客户端'),
+        title: DragToMoveArea(
+          child: Container(
+            color: Colors.transparent,
+            height: kToolbarHeight,
+            alignment: Alignment.centerLeft,
+            child: const Text('AutoLiangDu PC 新版客户端'),
+          ),
+        ),
         backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
         actions: [
@@ -344,11 +347,7 @@ class _HomePageState extends State<HomePage> with WindowListener, TrayListener {
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () async {
-              if (_minimizeToTray) {
-                await windowManager.hide();
-              } else {
-                exit(0);
-              }
+              await windowManager.hide();
             },
           ),
         ],
