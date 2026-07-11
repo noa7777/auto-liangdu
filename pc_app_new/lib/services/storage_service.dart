@@ -9,12 +9,18 @@ class StorageService {
 
   String? _appDataPath;
   List<MappingEntry> _mappingTable = [];
+  List<MappingEntry> _nightMappingTable = [];
   bool _minimizeToTray = false;
   bool _autoStart = false;
+  double _latitude = 39.9042; // 北京默认
+  double _longitude = 116.4074;
 
   List<MappingEntry> get mappingTable => List.unmodifiable(_mappingTable);
+  List<MappingEntry> get nightMappingTable => List.unmodifiable(_nightMappingTable);
   bool get minimizeToTray => _minimizeToTray;
   bool get autoStart => _autoStart;
+  double get latitude => _latitude;
+  double get longitude => _longitude;
 
   Future<void> initialize() async {
     try {
@@ -44,7 +50,13 @@ class StorageService {
         final json = jsonDecode(content);
         _minimizeToTray = json['minimizeToTray'] ?? false;
         _autoStart = json['autoStart'] ?? false;
+        _latitude = (json['latitude'] as num?)?.toDouble() ?? 39.9042;
+        _longitude = (json['longitude'] as num?)?.toDouble() ?? 116.4074;
         _mappingTable = (json['mappingTable'] as List?)
+                ?.map((e) => MappingEntry.fromJson(e))
+                .toList() ??
+            [];
+        _nightMappingTable = (json['nightMappingTable'] as List?)
                 ?.map((e) => MappingEntry.fromJson(e))
                 .toList() ??
             [];
@@ -60,7 +72,10 @@ class StorageService {
       final json = {
         'minimizeToTray': _minimizeToTray,
         'autoStart': _autoStart,
+        'latitude': _latitude,
+        'longitude': _longitude,
         'mappingTable': _mappingTable.map((e) => e.toJson()).toList(),
+        'nightMappingTable': _nightMappingTable.map((e) => e.toJson()).toList(),
       };
       await configFile.writeAsString(jsonEncode(json));
     } catch (e) {
@@ -77,6 +92,16 @@ class StorageService {
     _autoStart = value;
     await _saveData();
     await _updateAutoStartRegistry(value);
+  }
+
+  Future<void> setLatitude(double value) async {
+    _latitude = value;
+    await _saveData();
+  }
+
+  Future<void> setLongitude(double value) async {
+    _longitude = value;
+    await _saveData();
   }
 
   Future<void> _updateAutoStartRegistry(bool enable) async {
@@ -115,6 +140,13 @@ class StorageService {
     await _saveData();
   }
 
+  Future<void> updateNightMappingTable(List<MappingEntry> entries) async {
+    _nightMappingTable = List.from(entries);
+    _nightMappingTable.sort((a, b) => a.lux.compareTo(b.lux));
+    _dedupeNightMappingTable();
+    await _saveData();
+  }
+
   // 相同 Lux 只保留最后一项（后导入/后编辑的亮度覆盖前者）
   void _dedupeMappingTable() {
     final seen = <int>{};
@@ -123,6 +155,17 @@ class StorageService {
         _mappingTable.removeAt(i);
       } else {
         seen.add(_mappingTable[i].lux);
+      }
+    }
+  }
+
+  void _dedupeNightMappingTable() {
+    final seen = <int>{};
+    for (int i = _nightMappingTable.length - 1; i >= 0; i--) {
+      if (seen.contains(_nightMappingTable[i].lux)) {
+        _nightMappingTable.removeAt(i);
+      } else {
+        seen.add(_nightMappingTable[i].lux);
       }
     }
   }
@@ -145,7 +188,10 @@ class StorageService {
       final json = {
         'minimizeToTray': _minimizeToTray,
         'autoStart': _autoStart,
+        'latitude': _latitude,
+        'longitude': _longitude,
         'mappingTable': _mappingTable.map((e) => e.toJson()).toList(),
+        'nightMappingTable': _nightMappingTable.map((e) => e.toJson()).toList(),
       };
       final file = File(filePath);
       await file.writeAsString(jsonEncode(json));
@@ -161,12 +207,20 @@ class StorageService {
       final json = jsonDecode(content);
       _minimizeToTray = json['minimizeToTray'] ?? false;
       _autoStart = json['autoStart'] ?? false;
+      _latitude = (json['latitude'] as num?)?.toDouble() ?? 39.9042;
+      _longitude = (json['longitude'] as num?)?.toDouble() ?? 116.4074;
       _mappingTable = (json['mappingTable'] as List?)
               ?.map((e) => MappingEntry.fromJson(e))
               .toList() ??
           [];
       _mappingTable.sort((a, b) => a.lux.compareTo(b.lux));
       _dedupeMappingTable();
+      _nightMappingTable = (json['nightMappingTable'] as List?)
+              ?.map((e) => MappingEntry.fromJson(e))
+              .toList() ??
+          [];
+      _nightMappingTable.sort((a, b) => a.lux.compareTo(b.lux));
+      _dedupeNightMappingTable();
       await _saveData();
     } catch (e) {
       print('导入配置失败: $e');

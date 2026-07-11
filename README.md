@@ -1,6 +1,6 @@
 # AutoLiangDu
 
-本项目包含 AutoLiangDu 自动亮度调节系统的 PC 客户端与 ESP8266 采集端源码。
+本项目包含 AutoLiangDu 自动亮度调节系统的 PC 客户端与 ESP8266 采集端源码。。
 
 ## 目录结构
 
